@@ -8,6 +8,24 @@ Delta Live Tables) using the current `pyspark.pipelines` Python API.
 Adding a source table — whether it's the 10th or the 100th — is a
 one-entry change in `config/tables.yaml`. No code changes.
 
+## About this project
+
+This repository is a **reference architecture**: it exists to
+demonstrate, end to end, how to build metadata-driven CDC ingestion on
+Databricks following data engineering, software engineering, and CI/CD
+best practices — configuration as data, a validating loader that fails
+fast, Spark-free unit tests, an Asset Bundle with dev/test/prod
+targets, and a gated deployment workflow. It is not operating a
+production workload.
+
+It is runnable, not just readable: the pipeline was deployed and
+verified end to end on a live Databricks workspace (serverless, Unity
+Catalog) — SCD1/SCD2 merges, delete handling, same-millisecond
+event ordering via binlog position, tombstone handling, and
+expectation-based quality gates were all confirmed against real
+Debezium event data. See "Running on Databricks Free Edition" below to
+reproduce that run in a free workspace.
+
 ## Architecture
 
 ```mermaid
