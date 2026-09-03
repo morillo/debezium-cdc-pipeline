@@ -221,3 +221,56 @@ WHERE event_type = 'flow_progress';
   --full-refresh <table>_bronze,<table>_silver`).
 - **Dev teardown**: `databricks bundle destroy -t dev` removes a
   developer's copy cleanly.
+
+### Running on Databricks Free Edition
+
+This pipeline was verified end-to-end on Databricks Free Edition
+(serverless). Two of that edition's constraints require deviating from
+the defaults above; everything else works unchanged.
+
+1. **Use the built-in `workspace` catalog.** Free Edition uses Default
+   Storage, so the CLI cannot create catalogs (`databricks catalogs
+   create` fails with *"Metastore storage root URL does not exist"*).
+   Instead of `cdc_dev`, override the catalog variable at deploy time —
+   no code changes, this is what the bundle variable is for.
+
+2. **Point the landing root at a volume in that catalog.** Create the
+   schemas and volume, then edit `landing_root` in
+   `config/tables.yaml`:
+
+   ```yaml
+   landing_root: /Volumes/workspace/landing/debezium
+   ```
+
+Full sequence:
+
+```bash
+# authenticate (browser OAuth; no PAT needed)
+databricks auth login --host https://<workspace>.cloud.databricks.com \
+  --profile free
+
+# landing zone + target schema in the built-in catalog
+databricks schemas create landing workspace --profile free
+databricks schemas create cdc workspace --profile free
+databricks volumes create workspace landing debezium MANAGED \
+  --profile free
+
+# land some Debezium JSON events (one directory per topic)
+databricks fs cp -r ./events/ \
+  dbfs:/Volumes/workspace/landing/debezium/ --profile free
+
+# deploy and run with the catalog overridden
+databricks bundle validate -t dev --var="catalog=workspace" \
+  --profile free
+databricks bundle deploy   -t dev --var="catalog=workspace" \
+  --profile free
+databricks bundle run      -t dev debezium_cdc \
+  --var="catalog=workspace" --profile free
+```
+
+Tables land in `workspace.cdc` (the `target_schema` variable). The
+pipeline is already `serverless: true`, which is the only compute Free
+Edition offers, so no compute changes are needed. Teardown:
+`databricks bundle destroy -t dev --var="catalog=workspace"
+--profile free`, then drop the `workspace.cdc` and `workspace.landing`
+schemas.
