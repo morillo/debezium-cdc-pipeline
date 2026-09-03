@@ -67,4 +67,5 @@ gold:
       FROM customers_silver AS c
       LEFT JOIN orders_silver AS o
         ON o.customer_id = c.id
+      WHERE c.`__END_AT` IS NULL  -- customers is SCD2: current rows only
       GROUP BY c.id, c.email

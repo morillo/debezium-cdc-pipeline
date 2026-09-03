@@ -15,15 +15,8 @@ is a metadata change only — no code changes required.
 """
 
 import sys
-from pathlib import Path
 
-# The bundle deploys src/ as the pipeline root; make cdc_framework
-# importable regardless of how the runtime seeds sys.path.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from pyspark.sql import SparkSession  # noqa: E402
-
-from cdc_framework import flows, load_config  # noqa: E402
+from pyspark.sql import SparkSession
 
 spark = SparkSession.getActiveSession()
 
@@ -37,6 +30,13 @@ def _required_setting(key: str) -> str:
         )
     return value
 
+
+# The runtime executes this file as a notebook-style cell (__file__ is
+# undefined), so the deployed src/ directory is passed in explicitly to
+# make the cdc_framework package importable.
+sys.path.insert(0, _required_setting("cdc.src_path"))
+
+from cdc_framework import flows, load_config  # noqa: E402
 
 config = load_config(
     path=_required_setting("cdc.config_path"),
