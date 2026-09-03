@@ -1,0 +1,18 @@
+# Lakeflow Declarative Pipeline resource for the Debezium CDC framework.
+
+resources:
+  pipelines:
+    debezium_cdc:
+      name: debezium-cdc-${bundle.target}
+      catalog: ${var.catalog}
+      schema: ${var.target_schema}
+      serverless: true
+      continuous: false # run triggered; schedule with a job or enable
+      channel: CURRENT
+      root_path: ../src
+      libraries:
+        - glob:
+            include: ../src/**
+      configuration:
+        cdc.environment: ${var.environment}
+        cdc.config_path: ${workspace.file_path}/config/tables.yaml

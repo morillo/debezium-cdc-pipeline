@@ -1,0 +1,70 @@
+# Table metadata for the Debezium CDC pipeline.
+#
+# One file serves every environment: "{env}" is replaced with the value
+# of the cdc.environment pipeline setting (dev | test | prod). Adding a
+# source table is one new entry under "tables" — no code changes.
+#
+# Per-table reference (see cdc_framework/config.py for full docs):
+#   name              logical table name (required)
+#   source_database   MySQL database, used in the Debezium topic (required)
+#   keys              primary-key columns for the merge (required)
+#   scd_type          1 = current state (default), 2 = full history
+#   path              override the derived landing directory
+#   schema_hints      Auto Loader cloudFiles.schemaHints string
+#   column_transforms column -> SQL expression, applied before the merge
+#   exclude_columns   row columns to drop before the merge
+#   cluster_by        liquid clustering columns for the silver table
+#   expectations      warn / drop / fail -> {rule_name: SQL constraint}
+
+landing_root: /Volumes/cdc_{env}/landing/debezium
+topic_template: mysql.{database}.{table}
+
+defaults:
+  source_database: inventory
+  keys: [id]
+  scd_type: 1
+
+tables:
+  - name: customers
+    comment: Customer master data, full history retained.
+    scd_type: 2
+    cluster_by: [id]
+    column_transforms:
+      # Debezium encodes temporal types as epoch ints; make them real
+      # timestamps/dates in silver. For DECIMAL columns prefer setting
+      # decimal.handling.mode=string on the connector.
+      created_at: timestamp_millis(created_at)
+      birth_date: date_add(date'1970-01-01', cast(birth_date as int))
+    expectations:
+      drop:
+        valid_email: email IS NULL OR email LIKE '%@%'
+
+  - name: orders
+    keys: [order_id]
+    schema_hints: payload.after.total_amount DOUBLE
+    cluster_by: [order_id]
+    column_transforms:
+      order_date: date_add(date'1970-01-01', cast(order_date as int))
+    expectations:
+      warn:
+        positive_amount: total_amount >= 0
+
+  - name: products
+
+  - name: addresses
+    keys: [id]
+    exclude_columns: [internal_notes]
+
+gold:
+  - name: gold_customer_order_totals
+    comment: Lifetime order count and value per customer.
+    sql: |
+      SELECT
+        c.id AS customer_id,
+        c.email,
+        COUNT(o.order_id) AS order_count,
+        SUM(o.total_amount) AS lifetime_value
+      FROM customers_silver AS c
+      LEFT JOIN orders_silver AS o
+        ON o.customer_id = c.id
+      GROUP BY c.id, c.email
