@@ -157,9 +157,9 @@ with queries over the silver tables and the pipeline event log
 ## Local development
 
 ```bash
-pip install -e ".[dev]"
-ruff check src tests
-pytest
+uv sync --extra dev
+uv run ruff check src tests
+uv run pytest
 ```
 
 ## Requirements and notes
