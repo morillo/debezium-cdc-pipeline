@@ -263,12 +263,10 @@ the defaults above; everything else works unchanged.
    no code changes, this is what the bundle variable is for.
 
 2. **Point the landing root at a volume in that catalog.** Create the
-   schemas and volume, then edit `landing_root` in
-   `config/tables.yaml`:
-
-   ```yaml
-   landing_root: /Volumes/workspace/landing/debezium
-   ```
+   schemas and volume, then override the `landing_root` bundle variable
+   at deploy time (the committed `config/tables.yaml` stays unchanged;
+   the override reaches the pipeline as the `cdc.landing_root`
+   setting).
 
 Full sequence:
 
@@ -287,13 +285,12 @@ databricks volumes create workspace landing debezium MANAGED \
 databricks fs cp -r ./events/ \
   dbfs:/Volumes/workspace/landing/debezium/ --profile free
 
-# deploy and run with the catalog overridden
+# deploy and run with the catalog and landing root overridden
 databricks bundle validate -t dev --var="catalog=workspace" \
-  --profile free
+  --var="landing_root=/Volumes/workspace/landing/debezium" --profile free
 databricks bundle deploy   -t dev --var="catalog=workspace" \
-  --profile free
-databricks bundle run      -t dev debezium_cdc \
-  --var="catalog=workspace" --profile free
+  --var="landing_root=/Volumes/workspace/landing/debezium" --profile free
+databricks bundle run      -t dev debezium_cdc --profile free
 ```
 
 Tables land in `workspace.cdc` (the `target_schema` variable). The
