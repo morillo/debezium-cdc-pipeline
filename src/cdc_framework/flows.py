@@ -86,8 +86,8 @@ def _register_bronze(spark: SparkSession, table: TableConfig) -> None:
             )
         return reader.load(table.path)
 
-    # Expectations exist in Databricks' pyspark.pipelines, not in the OSS stubs.
-    bronze = dp.expect(*RESCUE_EXPECTATION)(bronze)  # type: ignore[attr-defined]
+    # Databricks adds expectations to pyspark.pipelines; OSS stubs lack them.
+    bronze = dp.expect(*RESCUE_EXPECTATION)(bronze)  # type: ignore
     dp.table(
         name=table.bronze_name,
         comment=(
@@ -116,7 +116,9 @@ def _register_silver_feed(spark: SparkSession, table: TableConfig) -> None:
             "_row_image", _row_image_column(events.schema)
         )
         row_type = events.schema["_row_image"].dataType
-        assert isinstance(row_type, StructType), "_row_image must be a struct column"
+        assert isinstance(row_type, StructType), (
+            "_row_image must be a struct column"
+        )
         df = events.select(
             _metadata_columns(events.schema)
             + _row_columns(row_type, table.exclude_columns)
@@ -125,17 +127,23 @@ def _register_silver_feed(spark: SparkSession, table: TableConfig) -> None:
             df = df.withColumn(column, F.expr(expression))
         return df
 
-    # Expectations exist in Databricks' pyspark.pipelines, not in the OSS stubs.
-    silver_feed = dp.expect_or_drop(*TOMBSTONE_EXPECTATION)(silver_feed)  # type: ignore[attr-defined]
+    # Databricks adds expectations to pyspark.pipelines; OSS stubs lack them.
+    silver_feed = dp.expect_or_drop(*TOMBSTONE_EXPECTATION)(  # type: ignore
+        silver_feed
+    )
     drop_rules = {
         **dict([key_expectation(table.keys)]),
         **table.expectations.get("drop", {}),
     }
-    silver_feed = dp.expect_all_or_drop(drop_rules)(silver_feed)  # type: ignore[attr-defined]
+    silver_feed = dp.expect_all_or_drop(drop_rules)(silver_feed)  # type: ignore
     if table.expectations.get("warn"):
-        silver_feed = dp.expect_all(table.expectations["warn"])(silver_feed)  # type: ignore[attr-defined]
+        silver_feed = dp.expect_all(table.expectations["warn"])(  # type: ignore
+            silver_feed
+        )
     if table.expectations.get("fail"):
-        silver_feed = dp.expect_all_or_fail(table.expectations["fail"])(  # type: ignore[attr-defined]
+        silver_feed = dp.expect_all_or_fail(  # type: ignore
+            table.expectations["fail"]
+        )(
             silver_feed
         )
     dp.temporary_view(
@@ -168,8 +176,8 @@ def _register_silver(table: TableConfig) -> None:
         sequence_by=F.struct(F.col(CDC_TS_MS), F.col(CDC_POS)),
         apply_as_deletes=F.expr(DELETE_PREDICATE),
         except_column_list=list(CDC_METADATA_COLUMNS),
-        # Databricks supports SCD type 2 here; the OSS stubs only declare type 1.
-        stored_as_scd_type=table.scd_type,  # type: ignore[arg-type]
+        # Databricks supports SCD type 2 here; OSS stubs only declare type 1.
+        stored_as_scd_type=table.scd_type,  # type: ignore
     )
 
 
