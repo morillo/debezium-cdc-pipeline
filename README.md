@@ -168,7 +168,7 @@ with queries over the silver tables and the pipeline event log
 ## Local development
 
 ```bash
-uv sync --extra dev
+uv sync                    # installs the dev tools (ruff, pyright, pytest)
 uv run ruff check src tests
 uv run pyright
 uv run pytest
