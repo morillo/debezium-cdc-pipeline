@@ -153,7 +153,8 @@ test/prod) in `databricks.yml` before first use.
 
 `.github/workflows/ci.yml` implements the standard flow:
 
-1. Every PR: `ruff` lint, `pytest` unit tests, `bundle validate`.
+1. Every PR: `ruff` lint, `pyright` type check, `pytest` unit tests,
+   `bundle validate`.
 2. Merge to `main`: deploy to **test**.
 3. Tag `v*`: deploy to **prod** (protect with a GitHub environment
    requiring reviewers).
@@ -169,6 +170,7 @@ with queries over the silver tables and the pipeline event log
 ```bash
 uv sync --extra dev
 uv run ruff check src tests
+uv run pyright
 uv run pytest
 ```
 
