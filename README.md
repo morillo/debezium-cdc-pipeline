@@ -1,12 +1,28 @@
 # debezium-cdc-pipeline — metadata-driven Debezium CDC ingestion
 
-A production-grade, metadata-driven framework for ingesting Debezium
-(MySQL) change-data-capture events into a Unity Catalog medallion
-architecture, built on **Lakeflow Declarative Pipelines** (formerly
-Delta Live Tables) using the current `pyspark.pipelines` Python API.
+A metadata-driven framework that turns Debezium (MySQL)
+change-data-capture events into up-to-date and historical tables in a
+Unity Catalog medallion architecture, built on **Lakeflow Declarative
+Pipelines** (formerly Delta Live Tables) with the current
+`pyspark.pipelines` Python API.
 
 Adding a source table — whether it's the 10th or the 100th — is a
 one-entry change in `config/tables.yaml`. No code changes.
+
+## Results
+
+The pipeline was deployed and run end to end on Databricks Free
+Edition (serverless compute, Unity Catalog `workspace` catalog) against
+hand-crafted Debezium JSON change events. SCD 1 and SCD 2 merges,
+delete handling, same-millisecond event ordering by binlog position,
+tombstone dropping and expectation-based quality gates all behaved as
+designed; see [Running on Databricks Free Edition](#running-on-databricks-free-edition)
+to repeat the run.
+
+Limitation: this is a functional verification, not a benchmark. There
+are no throughput or latency numbers, the sample events are not
+committed, and CI runs unit tests only for the Spark-free modules, so
+changes to `flows.py` are verified only by deploying to a dev target.
 
 ## About this project
 
@@ -17,14 +33,6 @@ best practices — configuration as data, a validating loader that fails
 fast, Spark-free unit tests, an Asset Bundle with dev/test/prod
 targets, and a gated deployment workflow. It is not operating a
 production workload.
-
-It is runnable, not just readable: the pipeline was deployed and
-verified end to end on a live Databricks workspace (serverless, Unity
-Catalog) — SCD1/SCD2 merges, delete handling, same-millisecond
-event ordering via binlog position, tombstone handling, and
-expectation-based quality gates were all confirmed against real
-Debezium event data. See "Running on Databricks Free Edition" below to
-reproduce that run in a free workspace.
 
 ## Architecture
 
@@ -61,7 +69,7 @@ debezium-cdc-pipeline/
 │       ├── debezium.py                # Envelope constants/helpers (Spark-free)
 │       └── flows.py                   # Dataset factories (pyspark.pipelines)
 ├── tests/                             # Unit tests (run anywhere, no Spark)
-└── .github/workflows/ci.yml           # Lint, test, validate, deploy
+└── .github/workflows/ci.yml           # Secret scan, lint, test, deploy
 ```
 
 ## How a table is configured
@@ -146,15 +154,27 @@ databricks bundle deploy -t dev --var catalog=workspace \
   --var landing_root=/Volumes/workspace/landing/debezium
 ```
 
-Fill in the `workspace.host` (and `run_as` service principals for
-test/prod) in `databricks.yml` before first use.
+No target commits a `workspace.host`. Set it (and the `run_as`
+service principals for test/prod) in `databricks.yml` before first use,
+or keep your dev host out of git in `resources/workspace.local.yml`
+(git-ignored, picked up by the bundle's `include: resources/*.yml`):
+
+```yaml
+targets:
+  dev:
+    workspace:
+      host: https://<your-dev-workspace>.cloud.databricks.com
+```
+
+The Databricks VS Code extension needs this host to offer sign-in.
 
 ## CI/CD
 
 `.github/workflows/ci.yml` implements the standard flow:
 
-1. Every PR: `ruff` lint, `pyright` type check, `pytest` unit tests,
-   `bundle validate`.
+1. Every PR: `gitleaks` secret scan (full history), `ruff` lint,
+   `pyright` type check, `pytest` unit tests, `bundle validate`. All
+   actions are pinned to commit SHAs; Dependabot bumps them weekly.
 2. Merge to `main`: deploy to **test**.
 3. Tag `v*`: deploy to **prod** (protect with a GitHub environment
    requiring reviewers).
@@ -203,8 +223,9 @@ uv run pytest
 
 ### One-time setup
 
-1. In `databricks.yml`, set `workspace.host` for each target and
-   `run_as.service_principal_name` for test and prod.
+1. In `databricks.yml`, set `workspace.host` for each target (for dev
+   you can use the git-ignored `resources/workspace.local.yml` instead,
+   see above) and `run_as.service_principal_name` for test and prod.
 2. Review `config/tables.yaml`: landing root, table list, keys.
 3. In GitHub, create `test` and `prod` environments, each with
    `DATABRICKS_HOST` and `DATABRICKS_TOKEN` secrets (service-principal
