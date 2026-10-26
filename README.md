@@ -19,6 +19,8 @@ tombstone dropping and expectation-based quality gates all behaved as
 designed; see [Running on Databricks Free Edition](#running-on-databricks-free-edition)
 to repeat the run.
 
+![Completed pipeline run on Databricks Free Edition: four tables flow from landing volume to bronze, silver feed and silver, then into the gold view](docs/images/pipeline-graph.png)
+
 Limitation: this is a functional verification, not a benchmark. There
 are no throughput or latency numbers, the sample events are not
 committed, and CI runs unit tests only for the Spark-free modules, so
@@ -337,6 +339,8 @@ on serverless compute in the workspace, so Databricks Connect is not
 used ("Databricks Connect disabled" in the status bar is expected).
 Optionally, [SQLTools](https://marketplace.visualstudio.com/items?itemName=mtxr.sqltools)
 with the Databricks driver queries the resulting tables.
+
+![VS Code: Databricks extension with the deployed pipeline, a SQLTools query over the gold view, and the pipeline run log](docs/images/vscode.png)
 
 **One-time setup** (all files below are git-ignored):
 
