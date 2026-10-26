@@ -19,6 +19,8 @@ tombstone dropping and expectation-based quality gates all behaved as
 designed; see [Running on Databricks Free Edition](#running-on-databricks-free-edition)
 to repeat the run.
 
+![Completed pipeline run on Databricks Free Edition: four tables flow from landing volume to bronze, silver feed and silver, then into the gold view](docs/images/pipeline-graph.png)
+
 Limitation: this is a functional verification, not a benchmark. There
 are no throughput or latency numbers, the sample events are not
 committed, and CI runs unit tests only for the Spark-free modules, so
@@ -166,7 +168,9 @@ targets:
       host: https://<your-dev-workspace>.cloud.databricks.com
 ```
 
-The Databricks VS Code extension needs this host to offer sign-in.
+The Databricks VS Code extension needs this host to offer sign-in. The
+same file can also hold per-workspace variable values; see
+[Running from VS Code](#running-from-vs-code).
 
 ## CI/CD
 
@@ -322,3 +326,89 @@ Edition offers, so no compute changes are needed. Teardown:
 `databricks bundle destroy -t dev --var="catalog=workspace"
 --profile free`, then drop the `workspace.cdc` and `workspace.landing`
 schemas.
+
+To skip the `--var` flags (and to run from VS Code), put the two
+overrides in `resources/workspace.local.yml` as shown in the next
+section.
+
+### Running from VS Code
+
+The [Databricks VS Code extension](https://marketplace.visualstudio.com/items?itemName=databricks.databricks)
+deploys and runs the bundle from the editor; the pipeline itself runs
+on serverless compute in the workspace, so Databricks Connect is not
+used ("Databricks Connect disabled" in the status bar is expected).
+Optionally, [SQLTools](https://marketplace.visualstudio.com/items?itemName=mtxr.sqltools)
+with the Databricks driver queries the resulting tables.
+
+![VS Code: Databricks extension with the deployed pipeline, a SQLTools query over the gold view, and the pipeline run log](docs/images/vscode.png)
+
+**One-time setup** (all files below are git-ignored):
+
+1. Run `uv sync`, and authenticate the CLI to your workspace
+   (`databricks auth login --host <workspace-url>`).
+2. Create `resources/workspace.local.yml` with the workspace host. On
+   Free Edition, also set the catalog and landing root there so no
+   `--var` flags are needed:
+
+   ```yaml
+   targets:
+     dev:
+       workspace:
+         host: https://<workspace>.cloud.databricks.com
+       variables:                # Free Edition only
+         catalog: workspace
+         landing_root: /Volumes/workspace/landing/debezium
+   ```
+
+   Check it with `databricks bundle validate -t dev`. Don't move or
+   edit this file while VS Code is open; the extension re-reads it and
+   reports "Invalid host name" if the host disappears.
+3. Create `.vscode/settings.json`:
+
+   ```json
+   {
+     "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+     "python.testing.pytestEnabled": true,
+     "python.testing.pytestArgs": ["tests"],
+     "databricks.python.environmentSetup": "manual",
+     "sqltools.connections": [
+       {
+         "name": "debezium cdc",
+         "driver": "Databricks",
+         "connectionMethod": "VS Code Extension (beta)",
+         "path": "/sql/1.0/warehouses/<warehouse-id>",
+         "catalog": "workspace",
+         "schema": "cdc"
+       }
+     ]
+   }
+   ```
+
+   `environmentSetup: manual` stops the extension from rebuilding the
+   uv-managed `.venv`. The SQLTools connection reuses the extension's
+   login, so no token is stored; omit it if you don't use SQLTools.
+   Set `catalog` to your `catalog` variable (`cdc_dev` outside Free
+   Edition).
+
+**Run:**
+
+1. Open the repo folder itself (`code debezium-cdc-pipeline`), not a
+   parent folder; the extension looks for `databricks.yml` at the
+   project root. If it reports that `databricks.yml` "already exists",
+   run **Databricks: Select a Databricks project folder** from the
+   command palette and pick the repo root.
+2. Unit tests: **Testing** view → **Run Tests** (same as
+   `uv run pytest`).
+3. Databricks view → **Configuration** → **Login to Databricks** → pick
+   your CLI profile. Configuration shows **Target: dev**.
+4. **Bundle Resource Explorer** → **Pipelines** → hover
+   `[dev <you>] debezium-cdc-dev` → **Deploy the bundle and run the
+   pipeline**. Dataset status appears under the pipeline; full output
+   via **Databricks: Show bundle logs**.
+5. Full refresh: same row → **Deploy the bundle and select pipeline
+   tables for partial update** → select the tables and **Full
+   refresh** → confirm.
+6. Query the results: open a `.sql` file, put the cursor in a query and
+   press `Cmd+E Cmd+E` (SQLTools), e.g.
+   `SELECT * FROM gold_customer_order_totals` or the expectation
+   metrics query in [Post-deploy verification](#post-deploy-verification).
