@@ -16,8 +16,8 @@ Edition (serverless compute, Unity Catalog `workspace` catalog) against
 hand-crafted Debezium JSON change events. SCD 1 and SCD 2 merges,
 delete handling, same-millisecond event ordering by binlog position,
 tombstone dropping and expectation-based quality gates all behaved as
-designed; see [Running on Databricks Free Edition](#running-on-databricks-free-edition)
-to repeat the run.
+designed; see [Verifying the results](#verifying-the-results) for the
+queries and their output.
 
 ![Completed pipeline run on Databricks Free Edition: four tables flow from landing volume to bronze, silver feed and silver, then into the gold view](docs/images/pipeline-graph.png)
 
@@ -35,6 +35,13 @@ best practices — configuration as data, a validating loader that fails
 fast, Spark-free unit tests, an Asset Bundle with dev/test/prod
 targets, and a gated deployment workflow. It is not operating a
 production workload.
+
+Companion projects:
+[debezium-mongodb-cdc-pipeline](https://github.com/morillo/debezium-mongodb-cdc-pipeline)
+(the schemaless MongoDB twin of this framework, built on VARIANT),
+[dlt-debezium-mysql](https://github.com/morillo/dlt-debezium-mysql) and
+[dlt-debezium-mongodb](https://github.com/morillo/dlt-debezium-mongodb)
+(single-source pipelines).
 
 ## Architecture
 
@@ -71,7 +78,10 @@ debezium-cdc-pipeline/
 │       ├── debezium.py                # Envelope constants/helpers (Spark-free)
 │       └── flows.py                   # Dataset factories (pyspark.pipelines)
 ├── tests/                             # Unit tests (run anywhere, no Spark)
-└── .github/workflows/ci.yml           # Secret scan, lint, test, deploy
+├── docs/images/                       # README screenshots
+├── .github/workflows/ci.yml           # Secret scan, lint, test, deploy
+├── .github/dependabot.yml             # Weekly uv + Actions updates
+└── .pre-commit-config.yaml            # gitleaks hook
 ```
 
 ## How a table is configured
@@ -178,16 +188,20 @@ same file can also hold per-workspace variable values; see
 
 1. Every PR: `gitleaks` secret scan (full history), `ruff` lint,
    `pyright` type check, `pytest` unit tests, `bundle validate`. All
-   actions are pinned to commit SHAs; Dependabot bumps them weekly.
+   actions are pinned to commit SHAs; Dependabot bumps them, and the uv
+   dependencies, weekly.
 2. Merge to `main`: deploy to **test**.
 3. Tag `v*`: deploy to **prod** (protect with a GitHub environment
    requiring reviewers).
 
+The Databricks steps skip gracefully when the workspace secrets are not
+configured, so the workflow stays green on repos without a wired
+workspace.
+
 Unit tests cover the metadata loader and Debezium helpers and run
 without a Spark runtime. For integration testing, deploy to the dev
 target and run the pipeline against sample events; validate results
-with queries over the silver tables and the pipeline event log
-(expectation metrics).
+with the queries in [Verifying the results](#verifying-the-results).
 
 ## Local development
 
@@ -196,6 +210,8 @@ uv sync                    # installs the dev tools (ruff, pyright, pytest)
 uv run ruff check src tests
 uv run pyright
 uv run pytest
+
+uv tool install pre-commit && pre-commit install   # gitleaks on every commit
 ```
 
 ## Requirements and notes
@@ -266,6 +282,9 @@ SELECT COUNT(*) FROM cdc_prod.cdc.customers_silver;
 SELECT * FROM event_log(TABLE(cdc_prod.cdc.customers_silver))
 WHERE event_type = 'flow_progress';
 ```
+
+For the full set of checks, see
+[Verifying the results](#verifying-the-results).
 
 ### Rollback and re-processing
 
@@ -408,7 +427,62 @@ with the Databricks driver queries the resulting tables.
 5. Full refresh: same row → **Deploy the bundle and select pipeline
    tables for partial update** → select the tables and **Full
    refresh** → confirm.
-6. Query the results: open a `.sql` file, put the cursor in a query and
-   press `Cmd+E Cmd+E` (SQLTools), e.g.
-   `SELECT * FROM gold_customer_order_totals` or the expectation
-   metrics query in [Post-deploy verification](#post-deploy-verification).
+6. Query the results: SQLTools icon in the activity bar → hover the
+   **debezium cdc** connection → **Connect**. Save the queries from
+   [Verifying the results](#verifying-the-results) in a `.sql` file
+   (e.g. the git-ignored `.vscode/queries.sql`), put the cursor in a
+   query and press `Cmd+E Cmd+E`; the result opens in a tab beside the
+   editor.
+
+### Verifying the results
+
+Run these in the Databricks SQL Editor (with catalog `workspace` and
+schema `cdc` selected) or with SQLTools from VS Code. Outside Free
+Edition, use your `catalog` and `target_schema` values.
+
+```sql
+-- 1. Row counts per silver table (customers is SCD2: all versions + current)
+SELECT 'customers (all versions)' AS dataset, count(*) AS row_count FROM customers_silver
+UNION ALL SELECT 'customers (current)', count(*) FROM customers_silver WHERE __END_AT IS NULL
+UNION ALL SELECT 'orders', count(*) FROM orders_silver
+UNION ALL SELECT 'products', count(*) FROM products_silver
+UNION ALL SELECT 'addresses', count(*) FROM addresses_silver;
+
+-- 2. SCD2 history of customers (__END_AT NULL = current version)
+SELECT id, email, __START_AT, __END_AT
+FROM customers_silver
+ORDER BY id, __START_AT;
+
+-- 3. Gold view defined in config/tables.yaml
+SELECT * FROM gold_customer_order_totals ORDER BY customer_id;
+
+-- 4. Data-quality results per flow and expectation (whole pipeline's event log)
+SELECT e.origin.flow_name AS flow, ex.name AS expectation,
+       SUM(ex.passed_records) AS passed, SUM(ex.failed_records) AS failed
+FROM event_log(TABLE(workspace.cdc.customers_silver)) e
+LATERAL VIEW explode(from_json(
+  e.details:flow_progress.data_quality.expectations,
+  'array<struct<name:string,dataset:string,passed_records:bigint,failed_records:bigint>>'
+)) t AS ex
+WHERE e.event_type = 'flow_progress'
+GROUP BY ALL
+ORDER BY flow, expectation;
+```
+
+What the verification run returned:
+
+- **Counts:** `customers_silver` 6 rows, 2 of them current;
+  `orders_silver` 2; `products_silver` 3; `addresses_silver` 2.
+- **SCD2 history:** Alice's email change is a closed row plus a current
+  row. Carol is deleted. Dave's update and delete in the same
+  millisecond are ordered by binlog position (5000, then 5001), so his
+  last version is closed. `__START_AT`/`__END_AT` are the
+  `(ts_ms, pos)` sequence struct.
+- **Gold:** Alice has 1 order (lifetime value 250.5), Bob has 1
+  (149.99).
+- **Expectations:** on `customers`, `valid_debezium_op`,
+  `valid_primary_key` and `valid_email` each dropped 2 records. The
+  `positive_amount` warning flagged 4 order records but kept them, and
+  `no_rescued_data` found nothing on any bronze table. The event log
+  adds up every update, including full refreshes, so these counts grow
+  with each run.
